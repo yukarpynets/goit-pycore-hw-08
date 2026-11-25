@@ -118,12 +118,7 @@ class AddressBook(UserDict):
             return date(year, 3, 1)
 
     def get_upcoming_birthdays(self):
-        """
-        Повертає список контактів, яких потрібно привітати
-        протягом наступних 7 днів (включно з сьогоднішнім).
-        Якщо день народження припадає на вихідні,
-        привітання переноситься на понеділок.
-        """
+        """Повертає контакти для привітання на 7 днів уперед (вихідні -> понеділок)."""
         today = date.today()
         upcoming = []
 
@@ -163,7 +158,162 @@ def save_data(book: AddressBook, filename: str = "addressbook.pkl") -> None:
 
 
 def load_data(filename: str = "addressbook.pkl") -> AddressBook:
-    """
-    Завантажує адресну книгу з файлу.
+    """Завантажує адресну книгу з файлу. Якщо файлу немає — повертає нову порожню книгу."""
+    try:
+        with open(filename, "rb") as file:
+            return pickle.load(file)
+    except FileNotFoundError:
+        return AddressBook()
 
-    Якщо файл ще не існує,
+
+# =========================
+# Логіка бота
+# =========================
+
+def input_error(func):
+    """Декоратор: перехоплює ValueError, KeyError, IndexError і повертає зрозуміле повідомлення."""
+    def inner(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except ValueError as error:
+            return str(error)
+        except KeyError:
+            return "Contact not found."
+        except IndexError:
+            return "Enter the argument for the command."
+
+    return inner
+
+
+def parse_input(user_input: str) -> tuple:
+    """Розбирає введений рядок на команду (у нижньому регістрі) та аргументи."""
+    cmd, *args = user_input.split()
+    cmd = cmd.strip().lower()
+    return cmd, *args
+
+
+@input_error
+def add_contact(args, book: AddressBook) -> str:
+    """Додає новий контакт або новий телефон до існуючого контакту."""
+    if len(args) < 2:
+        raise ValueError("Give me name and phone please.")
+    name, phone, *_ = args
+    record = book.find(name)
+
+    if record is None:
+        record = Record(name)
+        record.add_phone(phone)
+        book.add_record(record)
+        return "Contact added."
+
+    record.add_phone(phone)
+    return "Contact updated."
+
+
+@input_error
+def change_contact(args, book: AddressBook) -> str:
+    """Змінює телефон контакту: change [ім'я] [старий] [новий]."""
+    if len(args) < 3:
+        raise ValueError("Give me name, old phone and new phone please.")
+    name, old_phone, new_phone, *_ = args
+    record = book.find(name)
+    if record is None:
+        raise KeyError(name)
+    record.edit_phone(old_phone, new_phone)
+    return "Contact updated."
+
+
+@input_error
+def show_phone(args, book: AddressBook) -> str:
+    """Показує телефони контакту."""
+    name = args[0]
+    record = book.find(name)
+    if record is None:
+        raise KeyError(name)
+    if not record.phones:
+        return "No phones for this contact."
+    return "; ".join(p.value for p in record.phones)
+
+
+def show_all(book: AddressBook) -> str:
+    """Показує всі контакти з адресної книги."""
+    if not book.data:
+        return "No contacts saved."
+    return "\n".join(str(record) for record in book.data.values())
+
+
+@input_error
+def add_birthday(args, book: AddressBook) -> str:
+    """Додає день народження: add-birthday [ім'я] [DD.MM.YYYY]."""
+    if len(args) < 2:
+        raise ValueError("Give me name and birthday (DD.MM.YYYY) please.")
+    name, birthday, *_ = args
+    record = book.find(name)
+    if record is None:
+        raise KeyError(name)
+    record.add_birthday(birthday)
+    return "Birthday added."
+
+
+@input_error
+def show_birthday(args, book: AddressBook) -> str:
+    """Показує день народження контакту."""
+    name = args[0]
+    record = book.find(name)
+    if record is None:
+        raise KeyError(name)
+    if record.birthday is None:
+        return "Birthday is not set for this contact."
+    return str(record.birthday)
+
+
+@input_error
+def birthdays(args, book: AddressBook) -> str:
+    """Показує, кого потрібно привітати протягом наступного тижня."""
+    upcoming = book.get_upcoming_birthdays()
+    if not upcoming:
+        return "No birthdays in the next 7 days."
+    return "\n".join(
+        f"{item['name']}: {item['congratulation_date']}" for item in upcoming
+    )
+
+
+def main() -> None:
+    """Головний цикл бота: завантажує дані, приймає команди, зберігає дані при виході."""
+    book = load_data()
+    print("Welcome to the assistant bot!")
+
+    while True:
+        user_input = input("Enter a command: ")
+        if not user_input.strip():
+            print("Invalid command.")
+            continue
+
+        command, *args = parse_input(user_input)
+
+        if command in ["close", "exit"]:
+            save_data(book)
+            print("Good bye!")
+            break
+        elif command == "hello":
+            print("How can I help you?")
+        elif command == "add":
+            print(add_contact(args, book))
+        elif command == "change":
+            print(change_contact(args, book))
+        elif command == "phone":
+            print(show_phone(args, book))
+        elif command == "all":
+            print(show_all(book))
+        elif command == "add-birthday":
+            print(add_birthday(args, book))
+        elif command == "show-birthday":
+            print(show_birthday(args, book))
+        elif command == "birthdays":
+            print(birthdays(args, book))
+        else:
+            print("Invalid command.")
+
+
+if __name__ == "__main__":
+    main()
